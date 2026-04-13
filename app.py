@@ -1,5 +1,5 @@
 import streamlit as st
-from python_faq import app as agent_app
+from agent_faq import app as agent_app
 
 st.title("我的 AI Agent 🤖")
 
