@@ -1,0 +1,152 @@
+import json
+from typing import TypedDict, Literal
+
+from openai import OpenAI
+from langgraph.graph import StateGraph, END
+
+# 本地 vLLM
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="dummy",
+)
+
+MODEL_NAME = "google/gemma-2-2b-it"
+
+
+# 讀 FAQ
+with open("faq.json", "r", encoding="utf-8") as f:
+    FAQ_DATA = json.load(f)
+
+
+class AgentState(TypedDict, total=False):
+    user_input: str
+    route: Literal["faq", "llm"]
+    matched_answer: str
+    final_answer: str
+
+
+def classify_question(state: AgentState) -> AgentState:
+    """
+    先讓模型判斷：這題適不適合走 FAQ
+    只能回答 faq 或 llm
+    """
+    prompt = f"""
+你是一個問題路由器。
+請判斷下面使用者問題是否適合用 FAQ 回答。
+
+規則：
+- 如果是營業時間、開戶、掛失、手續費、一般流程、常見規定，回 faq
+- 如果是開放式建議、複雜推理、FAQ 看起來沒有涵蓋，回 llm
+
+只能輸出一個字串：
+faq
+或
+llm
+
+使用者問題：{state["user_input"]}
+""".strip()
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+    )
+
+    route = response.choices[0].message.content.strip().lower()
+    if "faq" not in route:
+        route = "llm"
+
+    return {"route": route}
+
+
+def faq_lookup(state: AgentState) -> AgentState:
+    """
+    簡單 FAQ 搜尋：
+    先做關鍵字包含比對，找不到再交給 LLM
+    """
+    user_q = state["user_input"].strip().lower()
+
+    # 1. 直接 question 包含比對
+    for item in FAQ_DATA:
+        q = item["question"].strip().lower()
+        if q in user_q or user_q in q:
+            return {"matched_answer": item["answer"]}
+
+    # 2. 粗略關鍵字比對
+    for item in FAQ_DATA:
+        q = item["question"]
+        keywords = [k for k in q.replace("？", "").replace("?", "").split() if k]
+        if any(k.lower() in user_q for k in keywords):
+            return {"matched_answer": item["answer"]}
+
+    # 3. 找不到
+    return {"matched_answer": ""}
+
+
+def answer_from_faq(state: AgentState) -> AgentState:
+    answer = state.get("matched_answer", "").strip()
+    if answer:
+        return {"final_answer": f"根據 FAQ：{answer}"}
+    return {
+        "final_answer": "我目前在 FAQ 裡找不到完全對應的答案，建議查看官方公告或改問更具體一點。"
+    }
+
+
+def answer_from_llm(state: AgentState) -> AgentState:
+    prompt = f"""
+你是一個銀行客服助理。
+請用清楚、保守、不亂編的方式回答下面問題。
+如果不確定，請明確說明可能需要以官方公告或客服為準。
+
+問題：{state["user_input"]}
+""".strip()
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+    )
+
+    return {"final_answer": response.choices[0].message.content.strip()}
+
+
+def route_by_type(state: AgentState) -> str:
+    return state["route"]
+
+
+# 建 LangGraph
+graph = StateGraph(AgentState)
+
+graph.add_node("classify_question", classify_question)
+graph.add_node("faq_lookup", faq_lookup)
+graph.add_node("answer_from_faq", answer_from_faq)
+graph.add_node("answer_from_llm", answer_from_llm)
+
+graph.set_entry_point("classify_question")
+
+graph.add_conditional_edges(
+    "classify_question",
+    route_by_type,
+    {
+        "faq": "faq_lookup",
+        "llm": "answer_from_llm",
+    },
+)
+
+graph.add_edge("faq_lookup", "answer_from_faq")
+graph.add_edge("answer_from_faq", END)
+graph.add_edge("answer_from_llm", END)
+
+app = graph.compile()
+
+
+if __name__ == "__main__":
+    print("FAQ Agent 已啟動，輸入 exit 離開。")
+    while True:
+        user_input = input("\n你：").strip()
+        if user_input.lower() in {"exit", "quit"}:
+            print("結束。")
+            break
+
+        result = app.invoke({"user_input": user_input})
+        print(f"AI：{result['final_answer']}")
