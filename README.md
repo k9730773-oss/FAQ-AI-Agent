@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # FAQ AI Agent
+=======
+# 金融 FAQ AI Agent
+>>>>>>> e7e1c64 (Initial commit - financial AI agent)
 
 本專案實作一個本地運行的 AI 客服系統，透過 LangGraph 設計 Agent workflow，結合 FAQ 知識庫與 LLM 回答能力。
 
@@ -40,4 +44,8 @@
 
 ```bash
 python -m vllm.entrypoints.openai.api_server \
+<<<<<<< HEAD
   --model google/gemma-2-2b-it
+=======
+  --model google/gemma-2-2b-it
+>>>>>>> e7e1c64 (Initial commit - financial AI agent)
