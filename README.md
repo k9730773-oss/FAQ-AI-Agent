@@ -1,4 +1,4 @@
-# 金融 FAQ AI Agent
+# FAQ AI Agent
 
 本專案實作一個本地運行的 AI 客服系統，透過 LangGraph 設計 Agent workflow，結合 FAQ 知識庫與 LLM 回答能力。
 
